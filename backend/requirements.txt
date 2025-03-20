@@ -90,10 +90,9 @@ pycparser==2.22
 PyGetWindow==0.0.9
 Pygments==2.18.0
 PyJWT==2.9.0
-PyMsgBox==1.0.9
-pyobjc-core==10.2
-pyobjc-framework-Cocoa==10.2
-pyobjc-framework-Quartz==10.2
+
+
+
 pyOpenSSL==25.0.0
 pyparsing==3.1.2
 pyperclip==1.8.2
