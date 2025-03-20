@@ -1,0 +1,39 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:14
+    container_name: carpooling_db
+    restart: always
+    environment:
+      POSTGRES_DB: carpooling_db
+      POSTGRES_USER: carpool_user
+      POSTGRES_PASSWORD: admin123
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U carpool_user -d carpooling_db"]
+      interval: 5s
+      retries: 5
+      timeout: 3s
+
+  backend:
+    build: .
+    container_name: carpooling_backend
+    depends_on:
+      db:
+        condition: service_healthy  # 👈 Ensures PostgreSQL is ready before Django starts
+    ports:
+      - "8000:8000"
+    environment:
+      - DB_NAME=carpooling_db
+      - DB_USER=carpool_user
+      - DB_PASSWORD=admin123
+      - DB_HOST=db
+      - DB_PORT=5432
+    command: ["sh", "-c", "sleep 10 && python manage.py migrate && python manage.py runserver 0.0.0.0:8000"]
+
+volumes:
+  postgres_data:
