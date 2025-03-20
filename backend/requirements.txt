@@ -21,8 +21,7 @@ click==8.1.7
 constantly==23.10.4
 contourpy==1.2.1
 cryptography==44.0.2
-cv==1.0.0
-cvzone==1.6.1
+
 cycler==0.12.1
 daphne==4.1.2
 dj-database-url==2.3.0
@@ -73,8 +72,7 @@ multidict==6.1.0
 namex==0.0.8
 numpy==2.0.0
 opencage==3.0.4
-opencv-contrib-python==4.10.0.84
-opencv-python==4.10.0.84
+
 opt-einsum==3.3.0
 optree==0.13.1
 packaging==24.1
