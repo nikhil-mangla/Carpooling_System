@@ -114,3 +114,5 @@ xyzservices==2025.1.0
 yarl==1.18.3
 geopy
 daphne
+python-dotenv
+psycopg2-binary>=2.9.9
