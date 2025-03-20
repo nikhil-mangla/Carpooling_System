@@ -1,27 +1,23 @@
-# Use a slim Python 3.10 image with amd64 architecture
-FROM --platform=linux/amd64 python:3.10-slim
+# Use an official Python runtime as a parent image
+FROM python:3.12-slim
+
+# Set environment variables
+ENV PYTHONUNBUFFERED=1
 
 # Set working directory
 WORKDIR /app
 
-# Install only essential build tools for psycopg2-binary or other binary dependencies
-RUN apt-get update && apt-get install -y \
-    gcc \
-    libpq-dev \
-    && rm -rf /var/lib/apt/lists/*
-
-# Copy requirements first for caching
-COPY requirements.txt .
+# Copy requirements file
+COPY requirements.txt /app/
 
 # Install dependencies
 RUN pip install --no-cache-dir -r requirements.txt
-RUN pip install daphne
 
-# Copy application code
-COPY . .
+# Copy the rest of the application code
+COPY . /app/
 
-# Set environment variable
-ENV PYTHONUNBUFFERED=1
+# Expose port 8000
+EXPOSE 8000
 
-# Run Daphne
-CMD ["daphne", "-b", "0.0.0.0", "-p", "8000", "carpooling_backend.asgi:application"]
+# Command to run the application
+CMD ["gunicorn", "carpooling_backend.asgi:application", "-k", "uvicorn.workers.UvicornWorker", "--bind", "0.0.0.0:8000"]
