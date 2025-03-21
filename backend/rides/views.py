@@ -4,12 +4,28 @@ from twilio.twiml.voice_response import VoiceResponse
 from twilio.rest import Client
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
-from rest_framework import generics, views
+from rest_framework import generics, views, status
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from .models import Ride, RideRequest
-from .serializers import RideSerializer, RideRequestSerializer
+from .serializers import RideSerializer, RideRequestSerializer,UserSerializer
 from geopy.distance import geodesic
+
+
+class RegisterView(generics.CreateAPIView):
+    serializer_class = UserSerializer
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        user = serializer.save()
+        return Response({
+            "user": {
+                "username": user.username,
+                "email": user.email
+            },
+            "message": "User created successfully"
+        }, status=status.HTTP_201_CREATED)
 
 class RideListCreateView(generics.ListCreateAPIView):
     queryset = Ride.objects.all()
@@ -17,7 +33,7 @@ class RideListCreateView(generics.ListCreateAPIView):
     permission_classes = [IsAuthenticated]
 
     def perform_create(self, serializer):
-        ride = serializer.save(driver=self.request.user)  # Set driver to current user
+        ride = serializer.save(driver=self.request.user)
         channel_layer = get_channel_layer()
         async_to_sync(channel_layer.group_send)(
             'rides',
