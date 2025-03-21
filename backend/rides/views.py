@@ -1,5 +1,5 @@
 import os
-import googlemaps
+import logging
 from twilio.twiml.voice_response import VoiceResponse
 from twilio.rest import Client
 from channels.layers import get_channel_layer
@@ -8,10 +8,13 @@ from rest_framework import generics, views, status
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from .models import Ride, RideRequest
-from .serializers import RideSerializer, RideRequestSerializer,UserSerializer
+from .serializers import RideSerializer, RideRequestSerializer, UserSerializer
 from geopy.distance import geodesic
 from django.utils import timezone
 from rest_framework.views import APIView
+
+# Set up logging
+logger = logging.getLogger(__name__)
 
 class RegisterView(generics.CreateAPIView):
     serializer_class = UserSerializer
@@ -48,30 +51,30 @@ class RouteMatchView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        print("Starting RouteMatchView.get")
+        logger.info("Starting RouteMatchView.get")
         try:
             pickup_lat = float(request.query_params.get('pickup_lat'))
             pickup_lng = float(request.query_params.get('pickup_lng'))
             dropoff_lat = float(request.query_params.get('dropoff_lat'))
             dropoff_lng = float(request.query_params.get('dropoff_lng'))
-            print(f"Query params: pickup_lat={pickup_lat}, pickup_lng={pickup_lng}, dropoff_lat={dropoff_lat}, dropoff_lng={dropoff_lng}")
+            logger.info(f"Query params: pickup_lat={pickup_lat}, pickup_lng={pickup_lng}, dropoff_lat={dropoff_lat}, dropoff_lng={dropoff_lng}")
         except (TypeError, ValueError) as e:
-            print(f"Error parsing query params: {e}")
+            logger.error(f"Error parsing query params: {e}")
             return Response({"error": "Invalid or missing coordinates"}, status=400)
 
         # Get all rides that haven't departed yet
-        print("Fetching rides from database")
+        logger.info("Fetching rides from database")
         rides = Ride.objects.filter(departure_time__gte=timezone.now())
-        print(f"Found {rides.count()} rides")
+        logger.info(f"Found {rides.count()} rides")
 
         if not rides:
-            print("No rides available")
+            logger.info("No rides available")
             return Response({"message": "No rides available"}, status=200)
 
         # Calculate distances and match percentage
         matches = []
         for ride in rides:
-            print(f"Processing ride ID {ride.id}")
+            logger.info(f"Processing ride ID {ride.id}")
             try:
                 # Calculate distances using geodesic
                 pickup_distance = geodesic(
@@ -82,7 +85,7 @@ class RouteMatchView(APIView):
                     (dropoff_lat, dropoff_lng),
                     (ride.dropoff_lat, ride.dropoff_lng)
                 ).km
-                print(f"Ride {ride.id}: pickup_distance={pickup_distance}, dropoff_distance={dropoff_distance}")
+                logger.info(f"Ride {ride.id}: pickup_distance={pickup_distance}, dropoff_distance={dropoff_distance}")
 
                 # Simple match percentage (lower distance = better match)
                 max_distance = 50  # km
@@ -108,10 +111,10 @@ class RouteMatchView(APIView):
                         "dropoff_distance_km": dropoff_distance,
                     })
             except Exception as e:
-                print(f"Error processing ride ID {ride.id}: {e}")
+                logger.error(f"Error processing ride ID {ride.id}: {e}")
                 return Response({"error": f"Error calculating distances: {str(e)}"}, status=500)
 
-        print(f"Returning {len(matches)} matches")
+        logger.info(f"Returning {len(matches)} matches")
         matches.sort(key=lambda x: x["match_percentage"], reverse=True)
         return Response(matches, status=200)
 
@@ -122,21 +125,34 @@ class RideRequestCreateView(generics.CreateAPIView):
 
     def perform_create(self, serializer):
         ride_request = serializer.save()
+        # Check if Twilio environment variables are set
+        twilio_account_sid = os.getenv('TWILIO_ACCOUNT_SID')
+        twilio_auth_token = os.getenv('TWILIO_AUTH_TOKEN')
+        twilio_phone_number = os.getenv('TWILIO_PHONE_NUMBER')
+        base_url = os.getenv('BASE_URL', 'https://carpooling-backend1.onrender.com')
+
+        if not all([twilio_account_sid, twilio_auth_token, twilio_phone_number]):
+            logger.warning("Twilio environment variables are not set. Skipping call initiation.")
+            return
+
         try:
-            # Assumes User has a related profile with phone_number
-            driver_phone = ride_request.ride.driver.profile.phone_number
-            if driver_phone:
-                client = Client(os.getenv('TWILIO_ACCOUNT_SID'), os.getenv('TWILIO_AUTH_TOKEN'))
-                call = client.calls.create(
-                    to=driver_phone,
-                    from_=os.getenv('TWILIO_PHONE_NUMBER'),
-                    url=f'{os.getenv("BASE_URL", "https://your-app-name.onrender.com")}/api/twilio-callback/'
-                )
-                print(f'Twilio Call SID: {call.sid}')
-        except AttributeError:
-            print("Driver has no phone number configured")
+            # Check if the driver has a phone number
+            driver_phone = None
+            if hasattr(ride_request.ride.driver, 'profile') and hasattr(ride_request.ride.driver.profile, 'phone_number'):
+                driver_phone = ride_request.ride.driver.profile.phone_number
+            else:
+                logger.warning("Driver has no phone number configured")
+                return
+
+            client = Client(twilio_account_sid, twilio_auth_token)
+            call = client.calls.create(
+                to=driver_phone,
+                from_=twilio_phone_number,
+                url=f'{base_url}/api/twilio-callback/'
+            )
+            logger.info(f'Twilio Call SID: {call.sid}')
         except Exception as e:
-            print(f"Twilio error: {str(e)}")
+            logger.error(f"Twilio error: {str(e)}")
 
 class InitiateCallView(views.APIView):
     permission_classes = [IsAuthenticated]
@@ -146,23 +162,36 @@ class InitiateCallView(views.APIView):
         if not to_number:
             return Response({'error': 'Missing "to" field'}, status=400)
 
+        # Check if Twilio environment variables are set
+        twilio_account_sid = os.getenv('TWILIO_ACCOUNT_SID')
+        twilio_auth_token = os.getenv('TWILIO_AUTH_TOKEN')
+        twilio_phone_number = os.getenv('TWILIO_PHONE_NUMBER')
+
+        if not all([twilio_account_sid, twilio_auth_token, twilio_phone_number]):
+            return Response({'error': 'Twilio environment variables are not set'}, status=500)
+
         try:
-            client = Client(os.getenv('TWILIO_ACCOUNT_SID'), os.getenv('TWILIO_AUTH_TOKEN'))
+            client = Client(twilio_account_sid, twilio_auth_token)
             call = client.calls.create(
                 to=to_number,
-                from_=os.getenv('TWILIO_PHONE_NUMBER'),
+                from_=twilio_phone_number,
                 url=f'{request.scheme}://{request.get_host()}/api/twilio-callback/'
             )
-            return Response({'sid': call.sid})
+            logger.info(f"Initiated call with SID: {call.sid}")
+            return Response({'sid': call.sid}, status=200)
         except Exception as e:
+            logger.error(f"Twilio error in InitiateCallView: {str(e)}")
             return Response({'error': str(e)}, status=500)
 
 class TwilioCallbackView(views.APIView):
     def post(self, request):
         response = VoiceResponse()
-        to_number = request.POST.get('to')
+        # Twilio sends the 'To' number in the request body (case-sensitive)
+        to_number = request.POST.get('To')
         if to_number:
             response.dial(to_number, caller_id=os.getenv('TWILIO_PHONE_NUMBER'))
+            logger.info(f"Twilio callback: Dialing {to_number}")
         else:
             response.say("No number provided for the call.")
+            logger.warning("Twilio callback: No 'To' number provided")
         return Response(str(response), content_type='text/xml')
