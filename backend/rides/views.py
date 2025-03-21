@@ -10,7 +10,8 @@ from rest_framework.permissions import IsAuthenticated
 from .models import Ride, RideRequest
 from .serializers import RideSerializer, RideRequestSerializer,UserSerializer
 from geopy.distance import geodesic
-
+from django.utils import timezone
+from rest_framework.views import APIView
 
 class RegisterView(generics.CreateAPIView):
     serializer_class = UserSerializer
@@ -43,61 +44,76 @@ class RideListCreateView(generics.ListCreateAPIView):
             }
         )
 
-class RouteMatchView(views.APIView):
+class RouteMatchView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        gmaps = googlemaps.Client(key=os.getenv('GOOGLE_MAPS_API_KEY'))
+        print("Starting RouteMatchView.get")
         try:
-            rider_pickup_lat = float(request.query_params.get('pickup_lat'))
-            rider_pickup_lng = float(request.query_params.get('pickup_lng'))
-            rider_dropoff_lat = float(request.query_params.get('dropoff_lat'))
-            rider_dropoff_lng = float(request.query_params.get('dropoff_lng'))
+            pickup_lat = float(request.query_params.get('pickup_lat'))
+            pickup_lng = float(request.query_params.get('pickup_lng'))
+            dropoff_lat = float(request.query_params.get('dropoff_lat'))
+            dropoff_lng = float(request.query_params.get('dropoff_lng'))
+            print(f"Query params: pickup_lat={pickup_lat}, pickup_lng={pickup_lng}, dropoff_lat={dropoff_lat}, dropoff_lng={dropoff_lng}")
+        except (TypeError, ValueError) as e:
+            print(f"Error parsing query params: {e}")
+            return Response({"error": "Invalid or missing coordinates"}, status=400)
 
-            rider_coords = (rider_pickup_lat, rider_pickup_lng)
-            rider_dropoff_coords = (rider_dropoff_lat, rider_dropoff_lng)
+        # Get all rides that haven't departed yet
+        print("Fetching rides from database")
+        rides = Ride.objects.filter(departure_time__gte=timezone.now())
+        print(f"Found {rides.count()} rides")
 
-            rides = Ride.objects.all()
-            matches = []
+        if not rides:
+            print("No rides available")
+            return Response({"message": "No rides available"}, status=200)
 
-            for ride in rides:
-                driver_pickup_coords = (ride.pickup_lat, ride.pickup_lng)
-                driver_dropoff_coords = (ride.dropoff_lat, ride.dropoff_lng)
+        # Calculate distances and match percentage
+        matches = []
+        for ride in rides:
+            print(f"Processing ride ID {ride.id}")
+            try:
+                # Calculate distances using geodesic
+                pickup_distance = geodesic(
+                    (pickup_lat, pickup_lng),
+                    (ride.pickup_lat, ride.pickup_lng)
+                ).km
+                dropoff_distance = geodesic(
+                    (dropoff_lat, dropoff_lng),
+                    (ride.dropoff_lat, ride.dropoff_lng)
+                ).km
+                print(f"Ride {ride.id}: pickup_distance={pickup_distance}, dropoff_distance={dropoff_distance}")
 
-                # Check proximity (within 5km)
-                pickup_distance = geodesic(rider_coords, driver_pickup_coords).km
-                dropoff_distance = geodesic(rider_dropoff_coords, driver_dropoff_coords).km
+                # Simple match percentage (lower distance = better match)
+                max_distance = 50  # km
+                match_percentage = max(0, 100 - ((pickup_distance + dropoff_distance) / max_distance) * 100)
 
-                if pickup_distance < 5 and dropoff_distance < 5:
-                    driver_route_response = gmaps.directions(
-                        driver_pickup_coords,
-                        driver_dropoff_coords,
-                        mode="driving"
-                    )
-                    if not driver_route_response:
-                        continue
-
-                    driver_route = driver_route_response[0]['overview_polyline']['points']
-                    rider_route_response = gmaps.directions(rider_coords, rider_dropoff_coords, mode="driving")
-                    if not rider_route_response:
-                        continue
-
-                    rider_route = rider_route_response[0]['overview_polyline']['points']
-                    overlap = len(set(rider_route).intersection(driver_route)) / len(rider_route) * 100
-
+                if match_percentage > 0:  # Only include rides with a positive match
                     matches.append({
-                        'ride': RideSerializer(ride).data,
-                        'match_percentage': min(100, max(0, overlap)),
-                        'pickup_distance_km': pickup_distance,
-                        'dropoff_distance_km': dropoff_distance,
+                        "ride": {
+                            "id": ride.id,
+                            "pickup_location": ride.pickup_location,
+                            "dropoff_location": ride.dropoff_location,
+                            "pickup_lat": ride.pickup_lat,
+                            "pickup_lng": ride.pickup_lng,
+                            "dropoff_lat": ride.dropoff_lat,
+                            "dropoff_lng": ride.dropoff_lng,
+                            "departure_time": ride.departure_time.isoformat(),
+                            "available_seats": ride.available_seats,
+                            "driver": ride.driver.id,
+                            "created_at": ride.created_at.isoformat(),
+                        },
+                        "match_percentage": match_percentage,
+                        "pickup_distance_km": pickup_distance,
+                        "dropoff_distance_km": dropoff_distance,
                     })
+            except Exception as e:
+                print(f"Error processing ride ID {ride.id}: {e}")
+                return Response({"error": f"Error calculating distances: {str(e)}"}, status=500)
 
-            return Response(matches)
-
-        except ValueError as e:
-            return Response({"error": "Invalid coordinates"}, status=400)
-        except Exception as e:
-            return Response({"error": str(e)}, status=500)
+        print(f"Returning {len(matches)} matches")
+        matches.sort(key=lambda x: x["match_percentage"], reverse=True)
+        return Response(matches, status=200)
 
 class RideRequestCreateView(generics.CreateAPIView):
     queryset = RideRequest.objects.all()
