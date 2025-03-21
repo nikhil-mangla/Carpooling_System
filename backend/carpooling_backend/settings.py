@@ -13,9 +13,9 @@ DOCKERIZED = os.getenv("DOCKERIZED", "False").lower() == "true"
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 # Security settings
-SECRET_KEY = os.getenv('SECRET_KEY', 'django-insecure-default-key-for-dev-only')  # Changed env var name to match .env
-DEBUG = os.getenv('DEBUG', 'True').lower() == 'true'
-ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "'carpooling-backend1.onrender.com',localhost,127.0.0.1").split(",")
+SECRET_KEY = os.getenv('SECRET_KEY')  # No default; must be set in environment
+DEBUG = os.getenv('DEBUG', 'False').lower() == 'true'
+ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "carpooling-backend1.onrender.com,localhost,127.0.0.1").split(",")
 
 # Installed applications
 INSTALLED_APPS = [
@@ -29,7 +29,7 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'django.contrib.sites',
     'rest_framework',
-    'rides',  # Confirmed present
+    'rides',
     'channels',
     'rest_framework_simplejwt',
     'allauth',
@@ -92,7 +92,7 @@ ASGI_APPLICATION = 'carpooling_backend.asgi.application'
 # Database Configuration (Render-compatible)
 DATABASES = {
     'default': dj_database_url.config(
-        default=f"postgres://{os.getenv('DATABASE_USER')}:{os.getenv('DATABASE_PASSWORD')}@{os.getenv('DATABASE_HOST')}:{os.getenv('DATABASE_PORT')}/{os.getenv('DATABASE_NAME')}",
+        default=os.getenv('DATABASE_URL'),
         conn_max_age=600
     )
 }
