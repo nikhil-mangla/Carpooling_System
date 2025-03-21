@@ -15,7 +15,11 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # Security settings
 SECRET_KEY = os.getenv('SECRET_KEY')  # No default; must be set in environment
 DEBUG = os.getenv('DEBUG', 'False').lower() == 'true'
-ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "carpooling-backend1.onrender.com,localhost,127.0.0.1").split(",")
+
+# Explicitly define ALLOWED_HOSTS with defaults and append from env var if provided
+DEFAULT_ALLOWED_HOSTS = ['carpooling-backend1.onrender.com', 'localhost', '127.0.0.1']
+ENV_ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "").split(",") if os.getenv("ALLOWED_HOSTS") else []
+ALLOWED_HOSTS = list(set(DEFAULT_ALLOWED_HOSTS + ENV_ALLOWED_HOSTS))  # Combine and remove duplicates
 
 # Installed applications
 INSTALLED_APPS = [
